@@ -143,7 +143,7 @@ plt.show()
 # Precision, Recall, ROC, and AUC Calculation
 
 # Set a threshold for recommendations
-threshold = 3.5  # Rating threshold for considering a recommendation as positive
+threshold = 4.0  # Raise the threshold for considering a recommendation as positive
 
 # True positives (if user rated positively)
 y_true = (rating_mat[UIDX] >= threshold).A.ravel()

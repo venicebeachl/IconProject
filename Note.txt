@@ -1,0 +1,77 @@
+In ambito ricerca DFS e Random Walk sono stati una merda con Precision alta e Recall basso o viceversa, anche provando ad ottimizzare
+
+1. Ricerca:
+	Random Walk							Concluso	
+2. Apprendimento:
+	KNN				Supervisionato			Concluso
+	K Fold Cross Validation		Non Supervisionato		Concluso	
+3. Ragionamento				
+	Reti Bayesiane			Probabilistico			Concluso (da fare run diverse)
+	Logic Based			Logico				Concluso
+
+
+Sistema Generoso, ma Imperfetto: Il sistema potrebbe essere un po' "troppo largo" nelle sue raccomandazioni (magari includendo film simili ai generi preferiti dall'utente ma non apprezzati effettivamente dall'utente).
+Miglioramento della Precisione: Per migliorare la precisione, si potrebbe cercare di affinare la logica che determina i film raccomandati, ad esempio utilizzando più criteri di filtraggio (ad esempio, combinando generi e valutazioni) o implementando un algoritmo di raccomandazione più avanzato (ad esempio, filtraggio collaborativo o basato su contenuti).
+
+
+### 3. Macroarea "Ricerca"
+**Tecnica Implementata: Random Walk**
+Il Random Walk è stato utilizzato per esplorare il grafo delle relazioni tra i film, considerando i film apprezzati come nodi iniziali e muovendosi verso film simili.
+
+**Metriche di Valutazione:**
+- **Precision**: ....
+- **Recall**: ....
+
+I risultati hanno mostrato che il Random Walk tende ad avere una precisione bassa e un recall alto, rendendolo poco bilanciato per il nostro scopo.
+
+### 4. Macroarea "Apprendimento"
+
+#### a) K-Nearest Neighbors (KNN)
+Il KNN è stato utilizzato per calcolare la similarità tra utenti, raccomandando film basati sui gusti degli utenti più simili.
+
+**Metriche di Valutazione:**
+- **Precision**: ....
+- **Recall**: ....
+
+#### b) K-Fold Cross Validation
+Il K-Fold Cross Validation è stato implementato per valutare la performance del KNN su diverse suddivisioni dei dati, riducendo il rischio di overfitting.
+
+**Metriche di Valutazione:**
+- **Precision**: ....
+- **Recall**: ....
+
+### 5. Macroarea "Ragionamento"
+
+#### a) Reti Bayesiane
+Le Reti Bayesiane sono state utilizzate per predire se un utente valuterà positivamente un film basandosi su caratteristiche come età, genere e preferenze passate.
+
+**Metriche di Valutazione:**
+- **Precision**: ....
+- **Recall**: ....
+
+#### b) Logic-Based Recommender
+Il sistema di raccomandazione basato sulla logica analizza i generi apprezzati dagli utenti e suggerisce film con generi simili. In caso di generi sconosciuti, vengono suggeriti film con valutazioni medie alte.
+
+**Metriche di Valutazione:**
+- **Precision**: ....
+- **Recall**: ....
+
+### 6. Confronto delle Soluzioni
+| Soluzione                  | Precision | Recall |
+|----------------------------|-----------|--------|
+| Random Walk               | ....      | ....   |
+| KNN                       | ....      | ....   |
+| K-Fold Cross Validation   | ....      | ....   |
+| Reti Bayesiane            | ....      | ....   |
+| Logic-Based Recommender   | ....      | ....   |
+
+**Soluzione Selezionata:** ....
+Motivazioni: ....
+
+### 7. Sviluppi Futuri
+- **Integrazione di modelli avanzati**: Implementazione di modelli basati su reti neurali per migliorare la qualità delle raccomandazioni.
+- **Espansione del dataset**: Utilizzo di dataset più ampi e aggiornati per migliorare la generalizzazione del sistema.
+- **Valutazioni utente-centriche**: Raccolta di feedback espliciti dagli utenti per ottimizzare ulteriormente il sistema.
+
+Con queste aggiunte, il sistema potrà evolversi verso un approccio più sofisticato e personalizzato.
+
