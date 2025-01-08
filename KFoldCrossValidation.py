@@ -12,164 +12,123 @@ import cornac
 from cornac.utils import cache
 from cornac.datasets import movielens
 from cornac.eval_methods import RatioSplit
-from cornac.models import UserKNN, ItemKNN
+from cornac.models import MF
 from sklearn.metrics import precision_score, recall_score, roc_curve, auc
 
 SEED = 42
 VERBOSE = False
 
-# Download some information of MovieLens 100K dataset
-user_df = pd.read_csv(
-  cache("http://files.grouplens.org/datasets/movielens/ml-100k/u.user"),
-  sep="|", names=["UserID", "Age", "Gender", "Occupation", "Zip Code"]
-).set_index("UserID")
+# Download and preprocess MovieLens 100K dataset
+def load_movielens_data():
+    user_df = pd.read_csv(
+        cache("http://files.grouplens.org/datasets/movielens/ml-100k/u.user"),
+        sep="|", names=["UserID", "Age", "Gender", "Occupation", "Zip Code"]
+    ).set_index("UserID")
 
-item_df = pd.read_csv(
-  cache("http://files.grouplens.org/datasets/movielens/ml-100k/u.item"),
-  sep="|", encoding="ISO-8859-1",
-  names=["ItemID", "Title", "Release Date", "Video Release Date", "IMDb URL",
-         "unknown", "Action", "Adventure", "Animation", "Children's", "Comedy",
-         "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror",
-         "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"]
-).set_index("ItemID").drop(columns=["Video Release Date", "IMDb URL", "unknown"])
+    item_df = pd.read_csv(
+        cache("http://files.grouplens.org/datasets/movielens/ml-100k/u.item"),
+        sep="|", encoding="ISO-8859-1",
+        names=["ItemID", "Title", "Release Date", "Video Release Date", "IMDb URL",
+               "unknown", "Action", "Adventure", "Animation", "Children's", "Comedy",
+               "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror",
+               "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"]
+    ).set_index("ItemID").drop(columns=["Video Release Date", "IMDb URL", "unknown"])
 
-feedback_df = pd.read_csv(
-  cache("http://files.grouplens.org/datasets/movielens/ml-100k/u.data"),
-  sep="\t", names=["UserID", "ItemID", "Rating", "Timestamp"]
-).drop(columns=["Timestamp"])
+    feedback_df = pd.read_csv(
+        cache("http://files.grouplens.org/datasets/movielens/ml-100k/u.data"),
+        sep="\t", names=["UserID", "ItemID", "Rating", "Timestamp"]
+    ).drop(columns=["Timestamp"])
 
-# Convert to a list of (user, item, rating) tuples
-dataset = cornac.data.Dataset.from_uir(feedback_df.itertuples(index=False, name=None))
+    return user_df, item_df, feedback_df
 
-# UserKNN models
-uknn_cosine = UserKNN(k=2, similarity="cosine", verbose=VERBOSE).fit(dataset)
-print(f"Cosine(1,3) = {uknn_cosine.sim_mat[0, 2]:.3f}")
+# Function to perform K-Fold Cross Validation
+def cross_validate_model(feedback, k=10, threshold=3.0):
+    from sklearn.model_selection import KFold
 
-uknn_pearson = UserKNN(k=2, similarity="pearson", verbose=VERBOSE).fit(dataset)
-print(f"Pearson(1,3) = {uknn_pearson.sim_mat[0, 2]:.3f}")
+    kf = KFold(n_splits=k, shuffle=True, random_state=SEED)
+    precisions, recalls, roc_aucs, all_fpr, all_tpr, all_thresholds = [], [], [], [], [], []
 
-# UserKNN methods
-K = 50  # number of nearest neighbors
-uknn_base = UserKNN(
-  k=K, similarity="pearson", name="UserKNN-Base", verbose=VERBOSE
-)
-uknn_amp1 = UserKNN(
-  k=K, similarity="pearson", amplify=0.5, name="UserKNN-Amp0.5", verbose=VERBOSE
-)
-uknn_amp2 = UserKNN(
-  k=K, similarity="pearson", amplify=3.0, name="UserKNN-Amp3.0", verbose=VERBOSE
-)
-uknn_idf = UserKNN(
-  k=K, similarity="pearson", weighting="idf", name="UserKNN-IDF", verbose=VERBOSE
-)
-uknn_bm25 = UserKNN(
-  k=K, similarity="pearson", weighting="bm25", name="UserKNN-BM25", verbose=VERBOSE
-)
+    feedback = np.array(feedback)
 
-feedback = movielens.load_feedback(variant="100K")
-ratio_split = RatioSplit(feedback, test_size=0.1, seed=SEED, verbose=VERBOSE)
-cornac.Experiment(
-  eval_method=ratio_split,
-  models=[uknn_base, uknn_amp1, uknn_amp2, uknn_idf, uknn_bm25],
-  metrics=[cornac.metrics.RMSE()],
-).run()
+    for train_idx, test_idx in kf.split(feedback):
+        # Split data
+        train_feedback = feedback[train_idx]
+        test_feedback = feedback[test_idx]
 
-# ItemKNN model
-iknn_adjusted = ItemKNN(k=50, similarity="cosine", name="ItemKNN-Adjusted", verbose=VERBOSE)
-iknn_adjusted.fit(ratio_split.train_set)
+        # Convert to Cornac Dataset
+        train_set = cornac.data.Dataset.from_uir(train_feedback)
+        test_set = cornac.data.Dataset.from_uir(test_feedback)
 
-# Extract rating matrix and mappings
-rating_mat = iknn_adjusted.train_set.matrix
-user_id2idx = iknn_adjusted.train_set.uid_map
-user_idx2id = list(iknn_adjusted.train_set.user_ids)
-item_id2idx = iknn_adjusted.train_set.iid_map
-item_idx2id = list(iknn_adjusted.train_set.item_ids)
+        # Train the model
+        model = MF(k=50, max_iter=50, learning_rate=0.01, lambda_reg=0.1, verbose=VERBOSE)
+        model.fit(train_set)
 
-# User-specific analysis
-TOPK = 5
-UID = 1
-UIDX = user_id2idx[str(UID)]
+        # Predict on the test set
+        y_true, y_pred, scores = [], [], []
+        for user, item, rating in test_feedback:
+            try:
+                pred_score = model.score(user, item)
+                y_true.append(1 if rating >= threshold else 0)
+                y_pred.append(1 if pred_score >= threshold else 0)
+                scores.append(pred_score)
+            except cornac.exception.ScoreException:
+                # Ignore items that cannot be scored
+                continue
 
-print(f"UserID = {UID}")
-print("-" * 25)
-print(user_df.loc[UID])
+        # Calculate metrics if there are valid predictions
+        if y_true and scores:
+            precisions.append(precision_score(y_true, y_pred))
+            recalls.append(recall_score(y_true, y_pred))
+            fpr, tpr, thresholds = roc_curve(y_true, scores)
+            roc_aucs.append(auc(fpr, tpr))
+            all_fpr.append(fpr)
+            all_tpr.append(tpr)
+            all_thresholds.append(thresholds)
 
-# Top-rated items by user
-rating_arr = rating_mat[UIDX].A.ravel()
-top_rated_items = np.argsort(rating_arr)[-TOPK:]
-print(f"\nTOP {TOPK} RATED ITEMS BY USER {UID}:")
-print("Ratings:", rating_arr[top_rated_items])
-print(item_df.loc[[int(item_idx2id[i]) for i in top_rated_items]])
+    # Return mean metrics and ROC curve values
+    mean_precision = np.mean(precisions) if precisions else 0
+    mean_recall = np.mean(recalls) if recalls else 0
+    mean_roc_auc = np.mean(roc_aucs) if roc_aucs else 0
 
-# Recommendations
-recommendations, scores = iknn_adjusted.rank(UIDX)
-print(f"\nTOP {TOPK} RECOMMENDATIONS FOR USER {UID}:")
-print("Scores:", scores[recommendations[:TOPK]])
-print(item_df.loc[[int(item_idx2id[i]) for i in recommendations[:TOPK]]])
+    # Plot Precision and Recall
+    plt.figure(figsize=(10, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(range(k), precisions, label="Precision")
+    plt.plot(range(k), recalls, label="Recall")
+    plt.xlabel("Fold")
+    plt.ylabel("Score")
+    plt.title("Precision and Recall per Fold")
+    plt.legend()
 
-# Analyze nearest neighbors and contributions
-df = defaultdict(list)
-score_arr = iknn_adjusted.ui_mat[UIDX].A.ravel()
-rated_items = np.nonzero(rating_mat[UIDX])[1]
+    # Plot ROC AUC Curve
+    plt.subplot(1, 2, 2)
+    mean_fpr = np.linspace(0, 1, 100)
+    mean_tpr = np.mean([np.interp(mean_fpr, fpr, tpr) for fpr, tpr in zip(all_fpr, all_tpr)], axis=0)
+    plt.plot(mean_fpr, mean_tpr, color="b", label=f"Mean ROC (AUC = {mean_roc_auc:.3f})")
+    plt.plot([0, 1], [0, 1], linestyle="--", color="gray", label="Random")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("Mean ROC Curve")
+    plt.legend()
 
-for rec in recommendations[:TOPK]:
-    sim_arr = iknn_adjusted.sim_mat[rec].A.ravel()
-    nearest_neighbor = rated_items[np.argsort(sim_arr[rated_items])[-1]]
-    sim = sim_arr[nearest_neighbor]
-    score = score_arr[nearest_neighbor]
-    df["Recommendation"].append(item_df.loc[[int(item_idx2id[rec])]]["Title"].values[0])
-    df["Item NN"].append(nearest_neighbor)
-    df["Similarity"].append(sim)
-    df["Score of the NN"].append(score)
-    df["Contribution"].append((score * sim) / np.abs(sim))
+    plt.tight_layout()
+    plt.show()
 
-rec_df = pd.DataFrame.from_dict(df)
-print(rec_df)
+    return mean_precision, mean_recall, mean_roc_auc
 
-# Number of nearest neighbors rated
-n_nearest_neighbors = []
-for rec in recommendations[:TOPK]:
-    nearest_neighbors = np.argsort(iknn_adjusted.sim_mat[rec].A.ravel())[-K:]
-    n_nearest_neighbors.append(len(np.intersect1d(nearest_neighbors, rated_items)))
+# Main function
+if __name__ == "__main__":
+    user_df, item_df, feedback_df = load_movielens_data()
 
-rec_df["Number of rated NN"] = n_nearest_neighbors
+    # Prepare feedback as a list of tuples (user, item, rating)
+    feedback = feedback_df.to_records(index=False)
 
-# Visualization
-fig, ax = plt.subplots(figsize=(14, 5))
-sns.barplot(x="Recommendation", y="Number of rated NN", data=rec_df, palette="ch:.25", ax=ax)
-ax.set_xticklabels([textwrap.fill(x.get_text(), 25) for x in ax.get_xticklabels()])
-plt.show()
+    # Perform K-Fold Cross Validation
+    print("Eseguendo K-Fold Cross Validation...")
+    precision, recall, roc_auc = cross_validate_model(feedback, k=10, threshold=3.0)
 
-# Precision, Recall, ROC, and AUC Calculation
-
-# Set a threshold for recommendations
-threshold = 4.0  # Raise the threshold for considering a recommendation as positive
-
-# True positives (if user rated positively)
-y_true = (rating_mat[UIDX] >= threshold).A.ravel()
-
-# Predicted scores (1 if score >= threshold, else 0)
-y_pred = (scores >= threshold).astype(int)
-
-# Calculate Precision and Recall
-precision = precision_score(y_true, y_pred)
-recall = recall_score(y_true, y_pred)
-
-print(f"Precision: {precision:.3f}")
-print(f"Recall: {recall:.3f}")
-
-# Calculate ROC and AUC
-fpr, tpr, thresholds = roc_curve(y_true, scores)
-roc_auc = auc(fpr, tpr)
-
-print(f"ROC AUC: {roc_auc:.3f}")
-
-# Visualize the ROC curve
-plt.figure(figsize=(8, 6))
-plt.plot(fpr, tpr, color='blue', lw=2, label=f'ROC curve (AUC = {roc_auc:.3f})')
-plt.plot([0, 1], [0, 1], color='gray', linestyle='--')
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('Receiver Operating Characteristic')
-plt.legend(loc='lower right')
-plt.show()
+    # Output results
+    print("\nRisultati:")
+    print(f"Precision: {precision:.3f}")
+    print(f"Recall: {recall:.3f}")
+    print(f"ROC AUC: {roc_auc:.3f}")

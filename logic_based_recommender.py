@@ -2,10 +2,11 @@ import pandas as pd
 from sklearn.metrics import precision_score, recall_score
 from collections import Counter
 import random
+import matplotlib.pyplot as plt
 
 # Funzione per costruire i generi dei film
 def build_genres(item_df):
-    genre_columns = item_df.columns[2:]  # I generi partono dalla colonna 2 (altrimenti avremmo 'Title' come colonna 5)
+    genre_columns = item_df.columns[2:]  # I generi partono dalla colonna 2 (escludendo 'Title')
     item_df['genres'] = item_df[genre_columns].apply(
         lambda row: " ".join([col for col in genre_columns if row[col] == 1]), axis=1
     )
@@ -95,10 +96,25 @@ recommended_movies = recommend_movies_by_genres(liked_movies, item_df, feedback_
 recommended_ids = [movie_id for _, movie_id in recommended_movies]
 precision, recall = calculate_precision_recall(recommended_ids, liked_movies)
 
-# Output
+# Visualizzazione dei risultati
 print(f"Liked Movies: {liked_movies}")
 print(f"Recommended Movies:")
 for title, movie_id in recommended_movies:
     print(f"- {title} (ID: {movie_id})")
 print(f"\nPrecision: {precision:.2f}")
 print(f"Recall: {recall:.2f}")
+
+# Grafico Precision e Recall
+def plot_metrics(precision, recall):
+    metrics = ['Precision', 'Recall']
+    values = [precision, recall]
+
+    plt.bar(metrics, values, color=['blue', 'orange'])
+    plt.ylim(0, 1)  # Scala da 0 a 1
+    plt.title('Precision e Recall')
+    plt.ylabel('Valori')
+    for i, v in enumerate(values):
+        plt.text(i, v + 0.02, f"{v:.2f}", ha='center')
+    plt.show()
+
+plot_metrics(precision, recall)
