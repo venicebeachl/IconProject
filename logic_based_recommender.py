@@ -1,120 +1,101 @@
 import pandas as pd
-from sklearn.metrics import precision_score, recall_score
-from collections import Counter
-import random
-import matplotlib.pyplot as plt
 
-# Funzione per costruire i generi dei film
-def build_genres(item_df):
-    genre_columns = item_df.columns[2:]  # I generi partono dalla colonna 2 (escludendo 'Title')
-    item_df['genres'] = item_df[genre_columns].apply(
-        lambda row: " ".join([col for col in genre_columns if row[col] == 1]), axis=1
-    )
-    # Gestione di film senza generi
-    item_df['genres'] = item_df['genres'].replace("", "unknown")
+def load_movielens_data():
+    # Carica i dati degli utenti
+    user_df = pd.read_csv(
+        "http://files.grouplens.org/datasets/movielens/ml-100k/u.user",
+        sep="|", names=["UserID", "Age", "Gender", "Occupation", "Zip Code"]
+    ).set_index("UserID")
 
-# Funzione per calcolare precisione e richiamo
-def calculate_precision_recall(recommended, liked):
-    true_positive = len(set(recommended) & set(liked))
-    precision = true_positive / len(recommended) if recommended else 0
-    recall = true_positive / len(liked) if liked else 0
-    return precision, recall
+    # Carica i dati dei film
+    item_df = pd.read_csv(
+        "http://files.grouplens.org/datasets/movielens/ml-100k/u.item",
+        sep="|", encoding="ISO-8859-1",
+        names=["ItemID", "Title", "Release Date", "Video Release Date", "IMDb URL",
+               "unknown", "Action", "Adventure", "Animation", "Children's", "Comedy",
+               "Crime", "Documentary", "Drama", "Fantasy", "Film-Noir", "Horror",
+               "Musical", "Mystery", "Romance", "Sci-Fi", "Thriller", "War", "Western"]
+    ).set_index("ItemID").drop(columns=["Video Release Date", "IMDb URL", "unknown"])
 
-# Funzione per raccomandare film basati sui generi
-def recommend_movies_by_genres(liked_movies, item_df, feedback_df, top_n=10):
-    liked_genres = Counter()
-    for movie_id in liked_movies:
-        genres = item_df.loc[movie_id, 'genres'] if movie_id in item_df.index else ""
-        liked_genres.update(genres.split())
+    # Carica i dati delle valutazioni degli utenti sui film
+    feedback_df = pd.read_csv(
+        "http://files.grouplens.org/datasets/movielens/ml-100k/u.data",
+        sep="\t", names=["UserID", "ItemID", "Rating", "Timestamp"]
+    ).drop(columns=["Timestamp"])
 
-    if not liked_genres or "unknown" in liked_genres:  # Se i generi sono "unknown", non fare raccomandazioni basate sui generi
-        return fallback_recommendations(feedback_df, item_df, top_n)
+    return user_df, item_df, feedback_df
 
-    print("Generi apprezzati:", liked_genres)  # Debug generi
+# Carica i dati
+user_df, item_df, feedback_df = load_movielens_data()
 
-    top_genres = [genre for genre, count in liked_genres.items() if count > 1]  # Generi con più di 1 occorrenza
-    if not top_genres:  # Se nessun genere prevale, usa i generi più comuni
-        top_genres = [genre for genre, _ in liked_genres.most_common(3)]
+def build_knowledge_base(user_df, item_df, feedback_df):
+    kb = {}
 
-    # Raccomandazioni con almeno due generi condivisi e considerazione della valutazione media
-    recommended = item_df[item_df['genres'].apply(lambda x: sum(1 for genre in top_genres if genre in x) >= 2)]
-    recommended = recommended[~recommended.index.isin(liked_movies)]  # Escludi i film già apprezzati
+    # Iteriamo attraverso ogni utente
+    for user_id, user in user_df.iterrows():
+        liked_movies = feedback_df[feedback_df["UserID"] == user_id]
+        liked_movies = liked_movies[liked_movies["Rating"] > 3]
+        liked_movie_ids = liked_movies["ItemID"].tolist()
 
-    # Ordina i film per valutazione media (opzionale, solo se disponibile)
-    recommended['avg_rating'] = recommended.index.map(lambda movie_id: feedback_df[feedback_df['ItemID'] == movie_id]['Rating'].mean())
-    recommended = recommended.sort_values(by='avg_rating', ascending=False)
+        # Log per vedere quali film l'utente ha apprezzato
+        print(f"User {user_id} liked movies: {liked_movie_ids}")
 
-    recommended = recommended.head(top_n)
-    
-    return [(row['Title'], idx) for idx, row in recommended.iterrows()]
+        # Raccomandare film simili ai generi che l'utente ha apprezzato
+        recommended_movies = set()  # Usa un set per evitare duplicati
+        for movie_id in liked_movie_ids:
+            movie_info = item_df.loc[movie_id]
+            genres = movie_info.index[movie_info == 1].tolist()
 
-# Funzione di fallback per raccomandazioni casuali o con alte valutazioni
-def fallback_recommendations(feedback_df, item_df, top_n=10):
-    top_rated = (
-        feedback_df.groupby('ItemID')['Rating']
-        .mean()
-        .sort_values(ascending=False)
-        .head(top_n)
-        .index.tolist()
-    )
-    return [(item_df.loc[movie_id, 'Title'], movie_id) for movie_id in top_rated if movie_id in item_df.index]
+            # Log per vedere i generi di ogni film
+            print(f"Movie {movie_id} has genres: {genres}")
 
-# Dati di esempio
-item_data = {
-    'ItemID': [1, 2, 3, 4, 5],
-    'Title': ['Movie A', 'Movie B', 'Movie C', 'Movie D', 'Movie E'],
-    'Genre1': [1, 0, 1, 0, 1],
-    'Genre2': [0, 1, 0, 1, 0],
-    'Genre3': [0, 0, 1, 1, 0],
-}
-feedback_data = {
-    'UserID': [1, 1, 1, 2, 2],
-    'ItemID': [1, 2, 3, 4, 5],
-    'Rating': [5, 4, 5, 3, 4],
-}
+            for genre in genres:
+                if genre != "Title" and genre != "Release Date":  # Evita colonne inutili
+                    # Log per vedere quali film vengono aggiunti come raccomandazioni
+                    print(f"Adding movies from genre {genre}")
+                    recommended_movies.update(item_df[item_df[genre] == 1].index)  # Aggiungi film del genere
 
-liked_movies = [1, 3]  # Film apprezzati dall'utente
-item_df = pd.DataFrame(item_data).set_index('ItemID')
-feedback_df = pd.DataFrame(feedback_data)
+        # Verifica se sono stati aggiunti film raccomandati
+        print(f"Recommended movies for User {user_id}: {recommended_movies}")
+        kb[user_id] = list(recommended_movies)
 
-# Costruzione dei generi
-build_genres(item_df)
+    return kb
 
-# Debug dei dati
-def debug_dataframes():
-    print("\nDataframe Film:")
-    print(item_df[['Title', 'genres']])
-    print("\nDataframe Feedback:")
-    print(feedback_df)
 
-debug_dataframes()
+def calculate_precision_recall(kb, feedback_df, item_df, top_n=10):
+    total_precision = 0
+    total_recall = 0
+    total_users = len(kb)
 
-# Raccomandazioni
-recommended_movies = recommend_movies_by_genres(liked_movies, item_df, feedback_df, top_n=10)
+    for user_id, recommended_movies in kb.items():
+        # Otteniamo i film che l'utente ha visto e valutato positivamente
+        liked_movies = feedback_df[feedback_df["UserID"] == user_id]
+        liked_movies = liked_movies[liked_movies["Rating"] > 3]
+        liked_movie_ids = liked_movies["ItemID"].tolist()
 
-# Precisione e Richiamo
-recommended_ids = [movie_id for _, movie_id in recommended_movies]
-precision, recall = calculate_precision_recall(recommended_ids, liked_movies)
+        # Calcoliamo la precisione
+        true_positives = len(set(recommended_movies[:top_n]) & set(liked_movie_ids))
+        precision = true_positives / top_n if top_n > 0 else 0
 
-# Visualizzazione dei risultati
-print(f"Liked Movies: {liked_movies}")
-print(f"Recommended Movies:")
-for title, movie_id in recommended_movies:
-    print(f"- {title} (ID: {movie_id})")
-print(f"\nPrecision: {precision:.2f}")
-print(f"Recall: {recall:.2f}")
+        # Calcoliamo il recall
+        recall = true_positives / len(liked_movie_ids) if len(liked_movie_ids) > 0 else 0
 
-# Grafico Precision e Recall
-def plot_metrics(precision, recall):
-    metrics = ['Precision', 'Recall']
-    values = [precision, recall]
+        # Aggiungiamo alla somma
+        total_precision += precision
+        total_recall += recall
 
-    plt.bar(metrics, values, color=['blue', 'orange'])
-    plt.ylim(0, 1)  # Scala da 0 a 1
-    plt.title('Precision e Recall')
-    plt.ylabel('Valori')
-    for i, v in enumerate(values):
-        plt.text(i, v + 0.02, f"{v:.2f}", ha='center')
-    plt.show()
+    # Calcoliamo la precisione e il recall medi
+    avg_precision = total_precision / total_users if total_users > 0 else 0
+    avg_recall = total_recall / total_users if total_users > 0 else 0
 
-plot_metrics(precision, recall)
+    return avg_precision, avg_recall
+
+# Passo 1: costruire la knowledge base
+kb = build_knowledge_base(user_df, item_df, feedback_df)
+
+# Passo 2: calcolare la precisione e il recall
+avg_precision, avg_recall = calculate_precision_recall(kb, feedback_df, item_df)
+
+# Risultati finali
+print(f"Precisione media: {avg_precision}")
+print(f"Recall medio: {avg_recall}")

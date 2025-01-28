@@ -43,16 +43,28 @@ def compute_similarity(item_df):
     similarity_matrix = cosine_similarity(genre_matrix, genre_matrix)
     return similarity_matrix
 
-# Funzione per eseguire un Random Walk con pesi
-def random_walk(user_id, feedback_df, similarity_matrix, item_df, walk_length=30, top_n=15):
+# Funzione per eseguire un Random Walk su CSP
+def csp_random_walk(user_id, feedback_df, similarity_matrix, item_df, walk_length=50, top_n=15):
     # Trova i film che l'utente ha valutato positivamente
     user_ratings = feedback_df[feedback_df['UserID'] == user_id]
-    liked_movies = user_ratings[user_ratings['Rating'] >= 4]['ItemID'].tolist()
+    liked_movies = user_ratings[user_ratings['Rating'] == 5]['ItemID'].tolist()
+    if len(liked_movies) < 3:
+        liked_movies = user_ratings[user_ratings['Rating'] >= 4]['ItemID'].tolist()
+
+    # Definiamo i vincoli (ad esempio, preferenze per genere)
+    preferred_genres = ["Action", "Comedy", "Drama"]  # Esempio di preferenza dell'utente
 
     # Iniziamo il Random Walk da più film che l'utente ha apprezzato
     walk_path = []
     current_movies = random.sample(liked_movies, min(3, len(liked_movies)))  # Selezioniamo fino a 3 film apprezzati
     walk_path.extend(current_movies)
+
+    # Funzione per verificare se un film soddisfa i vincoli
+    def satisfies_constraints(movie_id):
+        genres = item_df.loc[movie_id, item_df.columns[5:]]
+        movie_genres = [col for col, value in genres.items() if value == 1]
+        genre_weight = sum(1 for genre in movie_genres if genre in preferred_genres)
+        return genre_weight > 0  # Solo film con almeno un genere preferito
 
     # Cammina nel grafo per un numero di passi
     for _ in range(walk_length):
@@ -61,13 +73,16 @@ def random_walk(user_id, feedback_df, similarity_matrix, item_df, walk_length=30
             similar_movies = list(enumerate(similarity_matrix[current_movie - 1]))  # Trova i film più simili
             similar_movies = sorted(similar_movies, key=lambda x: x[1], reverse=True)  # Ordina per similarità decrescente
 
-            # Aggiungi un bias ai film già apprezzati per favorire la loro selezione
-            weighted_movies = [(movie[0], movie[1] + (1.0 if (movie[0] + 1) in liked_movies else 0.0)) for movie in similar_movies]
+            # Filtra i film con similarità inferiore a una soglia
+            similarity_threshold = 0.2
+            weighted_movies = [(movie[0] + 1, movie[1] + (1.0 if (movie[0] + 1) in liked_movies else 0.0))
+                              for movie in similar_movies if movie[1] >= similarity_threshold]
 
-            # Seleziona il prossimo film da camminare
-            next_movie = random.choices([movie[0] for movie in weighted_movies], 
-                                        weights=[movie[1] for movie in weighted_movies], k=1)[0] + 1  # Aggiungi 1 per l'indice basato su 1
-            next_movies.append(next_movie)
+            # Seleziona solo i film che soddisfano i vincoli
+            valid_movies = [movie[0] for movie in weighted_movies if satisfies_constraints(movie[0])]
+            if valid_movies:
+                next_movie = max(valid_movies, key=lambda x: similarity_matrix[current_movie - 1][x - 1])
+                next_movies.append(next_movie)
 
         # Rinnova la lista dei film attuali (filtrando per i migliori)
         current_movies = next_movies[:top_n]  # Limitiamo a top_n film
@@ -117,13 +132,13 @@ if __name__ == "__main__":
 
     # Esempio: Raccomandazioni per un utente
     user_id = 1
-    recommendations, relevant_items = random_walk(user_id, feedback_df, similarity_matrix, item_df, walk_length=30, top_n=15)
+    recommendations, relevant_items = csp_random_walk(user_id, feedback_df, similarity_matrix, item_df, walk_length=50, top_n=15)
 
     # Calcola precisione e richiamo
     precision, recall = calculate_metrics(recommendations, relevant_items)
 
     # Mostra i risultati
-    print(f"Recommended Movies (Random Walk):")
+    print(f"Recommended Movies (CSP Random Walk):")
     for title, movie_id in recommendations:
         print(f"- {title} (ID: {movie_id})")
 
